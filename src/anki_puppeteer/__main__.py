@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -10,14 +11,43 @@ from anki_puppeteer.addon import install_ankiconnect
 from anki_puppeteer.anki import AnkiClient, AnkiConnectError
 from anki_puppeteer.audio import list_input_devices, test_mic
 from anki_puppeteer.config import cache_dir, load_settings
+from anki_puppeteer.launch import start_anki, wait_for_ankiconnect
 from anki_puppeteer.loop import build_stt, run
 from anki_puppeteer.models import ensure_silero, ensure_vosk
 from anki_puppeteer.selftest import run_self_test, run_wav
+from anki_puppeteer.setup import run_setup, setup_needed
+
+
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _set_console_title() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.SetConsoleTitleW("Anki Puppeteer")
+    except Exception:
+        pass
+
+
+def _pause_on_error(code: int) -> int:
+    if code == 0 or not _is_frozen():
+        return code
+    if not sys.stdin or not sys.stdin.isatty():
+        return code
+    try:
+        input("Press Enter to close")
+    except EOFError:
+        pass
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="anki-puppeteer",
+        prog="anki-puppeteer" if not _is_frozen() else "AnkiPuppeteer",
         description=(
             "Review Anki cards by voice while another app is focused. "
             "Local VAD + short-burst gate + whisper.cpp + exact whitelist + AnkiConnect."
@@ -55,6 +85,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Download Silero VAD and Vosk models, then exit",
     )
     parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Detect or install whisper.cpp, Silero VAD, a speech model, and AnkiConnect",
+    )
+    parser.add_argument(
+        "--model",
+        type=Path,
+        help="Existing local ggml-*.bin to use instead of downloading tiny.en",
+    )
+    parser.add_argument(
+        "--no-anki",
+        action="store_true",
+        help="Do not start Anki (frozen exe normally opens Anki first)",
+    )
+    parser.add_argument(
         "--install-ankiconnect",
         action="store_true",
         help="Install the AnkiConnect add-on into Anki's add-ons folder",
@@ -88,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args(argv)
 
+    _set_console_title()
+
     fmt = logging.Formatter("%(asctime)s  %(message)s", datefmt="%H:%M:%S")
     root = logging.getLogger()
     root.setLevel(logging.DEBUG if args.verbose else logging.INFO)
@@ -111,18 +158,23 @@ def main(argv: list[str] | None = None) -> int:
             spec = int(spec)
         return test_mic(spec)
 
+    if args.setup:
+        return run_setup(model=args.model, progress=log.info)
+
     settings = load_settings(args.config)
     if args.dry_run:
         settings.dry_run = True
     if args.device is not None:
         settings.input_device = int(args.device) if str(args.device).isdigit() else args.device
+    if args.model is not None:
+        settings.whisper_model = args.model
 
     if args.self_test:
         kind = "tiny" if args.stt == "auto" else args.stt
         return run_self_test(settings, stt_kind=kind)
 
     if args.wav:
-        stt = build_stt(args.stt)
+        stt = build_stt(args.stt, settings)
         rec = run_wav(args.wav, settings, stt, expect=args.expect)
         return 0 if rec["ok"] else 1
 
@@ -148,7 +200,41 @@ def main(argv: list[str] | None = None) -> int:
         log.info("AnkiConnect ok (version %s)", version)
         return 0
 
-    return run(settings, stt_kind=args.stt)
+    interactive_start = _is_frozen() and argv is None and len(sys.argv) <= 1
+    if setup_needed(settings):
+        log.info("Speech tools are missing; running first-run setup")
+        code = run_setup(model=args.model, progress=log.info)
+        if code != 0:
+            return _pause_on_error(code)
+        settings = load_settings(args.config)
+        if args.dry_run:
+            settings.dry_run = True
+        if args.device is not None:
+            settings.input_device = (
+                int(args.device) if str(args.device).isdigit() else args.device
+            )
+        if args.model is not None:
+            settings.whisper_model = args.model
+
+    if _is_frozen() and not args.no_anki and not args.dry_run:
+        start_anki(progress=log.info)
+        ready = wait_for_ankiconnect(
+            url=settings.anki_url,
+            api_key=settings.anki_key,
+            progress=log.info,
+        )
+        if not ready and interactive_start:
+            try:
+                input("Start a review in Anki, then press Enter here.")
+            except EOFError:
+                pass
+        log.info("Voice control is on. Say: show, again, hard, good, easy, undo.")
+        log.info("Close this window to stop.")
+
+    stt_kind = args.stt
+    if _is_frozen() and stt_kind == "auto":
+        stt_kind = "tiny"
+    return _pause_on_error(run(settings, stt_kind=stt_kind))
 
 
 if __name__ == "__main__":

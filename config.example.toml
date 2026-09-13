@@ -26,6 +26,15 @@
 url = "http://127.0.0.1:8765"
 # key = ""               # only if you set an AnkiConnect API key
 
+# Written by --setup / the Windows installer. Point model at any local ggml-*.bin
+# instead of downloading tiny.en.
+# [stt]
+# cli = "C:\\Users\\you\\AppData\\Local\\anki-puppeteer\\whisper\\whisper-cli.exe"
+# model = "C:\\Users\\you\\AppData\\Local\\anki-puppeteer\\ggml-tiny.en.bin"
+
+# [models]
+# silero = "C:\\Users\\you\\AppData\\Local\\anki-puppeteer\\silero_vad.onnx"
+
 # Whole-phrase aliases. The default is the six review words and nothing else.
 # [commands]
 # show = ["show", "show answer"]

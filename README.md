@@ -37,20 +37,38 @@ Say `show` before a grade. Anki rejects a grade while the question is still up; 
 
 ## Requirements
 
-This repo and the GitHub release are **source only**. Speech models are **not** published (`ggml-*.bin`, Vosk zips, Silero ONNX). They download to `%LOCALAPPDATA%\anki-puppeteer\` (or your existing whisper.cpp folder) on first use.
+Speech models are **not** published (`ggml-*.bin`, Vosk zips, Silero ONNX). They download to `%LOCALAPPDATA%\anki-puppeteer\` on first setup, or you can point at a model you already have.
 
-- Python 3.10+
 - Anki 2.1+ with [AnkiConnect](https://ankiweb.net/shared/info/2055492159) (add-on code `2055492159`)
 - A microphone
-- [whisper.cpp](https://github.com/ggml-org/whisper.cpp) `whisper-cli` on `PATH` or at `%USERPROFILE%\tools\whisper\whisper-cli.exe`
-- First run of `--stt tiny` fetches `ggml-tiny.en.bin` (~75 MB) and Silero VAD ONNX
+- Windows 10+ for the installer (x64). Source install also needs Python 3.10+
 
-`--stt vosk` downloads the small English Vosk model (~40 MB) instead of whisper.cpp. `--stt large` uses a **local** `whisper-server` + `ggml-large-v3.bin` if you already have them; those files are not in this project.
+The Windows installer detects missing tools and downloads [whisper.cpp](https://github.com/ggml-org/whisper.cpp) CPU `whisper-cli` plus Silero VAD. It will download `ggml-tiny.en.bin` (~75 MB) unless you browse to an existing `ggml-*.bin`.
+
+`--stt vosk` (source install only) downloads the small English Vosk model (~40 MB) instead of whisper.cpp. `--stt large` uses a **local** `whisper-server` + `ggml-large-v3.bin` if you already have them.
 
 ## Install
 
+### Windows installer (0.9.1-rc1)
+
+Download [AnkiPuppeteer-0.9.1-rc1-setup.exe](https://github.com/HeadlessHoncho/anki-puppeteer/releases/tag/v0.9.1-rc1) from the GitHub release (about 29 MB). Speech models are **not** in that file. Per-user, no admin. During setup:
+
+- **Download ggml-tiny.en.bin** — needs internet, ~75 MB plus an ~8 MB whisper.cpp zip
+- **Use an existing local Whisper model** — browse to a `ggml-*.bin` you already have (tiny/base/small/large-v3). That file is not copied; its path is written to `%LOCALAPPDATA%\anki-puppeteer\config.toml`
+
+Silent:
+
+```bat
+AnkiPuppeteer-0.9.1-rc1-setup.exe /SILENT
+AnkiPuppeteer-0.9.1-rc1-setup.exe /SILENT /MODEL="D:\models\ggml-tiny.en.bin"
+```
+
+Start menu: **Anki Puppeteer**. That opens Anki if needed, then starts voice control.
+
+### From source
+
 ```bash
-python -m pip install git+https://github.com/HeadlessHoncho/anki-puppeteer.git
+python -m pip install git+https://github.com/HeadlessHoncho/anki-puppeteer.git@v0.9.1-rc1
 ```
 
 From a clone:
@@ -86,7 +104,15 @@ anki-puppeteer --test-mic                # live level meter
 anki-puppeteer --self-test --stt tiny    # Windows TTS samples through the same gate/STT/whitelist
 anki-puppeteer --wav show.wav --expect show --stt tiny
 anki-puppeteer --stt tiny|large|vosk|auto
+anki-puppeteer --setup                 # detect/download whisper.cpp, Silero, tiny.en, AnkiConnect
+anki-puppeteer --setup --model D:\models\ggml-tiny.en.bin
 anki-puppeteer -c config.toml
+```
+
+Windows freeze + installer (does not embed models):
+
+```powershell
+powershell -File packaging\build.ps1
 ```
 
 Copy `config.example.toml` to `config.toml` (or `%LOCALAPPDATA%\anki-puppeteer\config.toml` on Windows) to change burst length, VAD threshold, AnkiConnect URL, or extra spoken aliases.

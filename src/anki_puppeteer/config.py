@@ -19,12 +19,25 @@ _APP_DIR = "anki-puppeteer"
 _LEGACY_DIR = "anki-voice-review"
 
 
+def _windows_local_appdata() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+
+
+def user_config_path() -> Path:
+    """Always the per-user config, even if a local config.toml exists in cwd."""
+    if os.name == "nt":
+        return _windows_local_appdata() / _APP_DIR / "config.toml"
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    return base / _APP_DIR / "config.toml"
+
+
 def default_config_path() -> Path:
     local = Path("config.toml")
     if local.is_file():
         return local
     if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        base = _windows_local_appdata()
         new = base / _APP_DIR / "config.toml"
         old = base / _LEGACY_DIR / "config.toml"
         if old.is_file() and not new.is_file():
@@ -41,7 +54,7 @@ def default_config_path() -> Path:
 
 def cache_dir() -> Path:
     if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        base = _windows_local_appdata()
     else:
         xdg = os.environ.get("XDG_CACHE_HOME")
         base = Path(xdg) if xdg else Path.home() / ".cache"
@@ -83,6 +96,8 @@ class Settings:
     dry_run: bool = False
     silero_path: Optional[Path] = None
     vosk_path: Optional[Path] = None
+    whisper_cli: Optional[Path] = None
+    whisper_model: Optional[Path] = None
 
     def gate_config(self) -> GateConfig:
         return GateConfig(
@@ -119,7 +134,69 @@ def load_settings(path: Optional[Path] = None) -> Settings:
     env_url = os.environ.get("ANKI_CONNECT_URL")
     if env_url:
         settings.anki_url = env_url
+    env_cli = os.environ.get("WHISPER_CLI")
+    if env_cli:
+        settings.whisper_cli = Path(env_cli)
+    env_model = os.environ.get("WHISPER_MODEL")
+    if env_model:
+        settings.whisper_model = Path(env_model)
     return settings
+
+
+def _toml_str(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def write_settings(settings: Settings, path: Optional[Path] = None) -> Path:
+    """Write a complete user config. Used by --setup; overwrites dest."""
+    dest = path or user_config_path()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Anki Puppeteer user config",
+        "",
+        "[audio]",
+    ]
+    if settings.input_device is not None:
+        if isinstance(settings.input_device, int):
+            lines.append(f"device = {settings.input_device}")
+        else:
+            lines.append(f"device = {_toml_str(str(settings.input_device))}")
+    lines.extend(
+        [
+            "",
+            "[gate]",
+            f"min_burst_seconds = {settings.min_burst_seconds}",
+            f"max_burst_seconds = {settings.max_burst_seconds}",
+            f"end_silence_seconds = {settings.end_silence_seconds}",
+            f"rearm_silence_seconds = {settings.rearm_silence_seconds}",
+            f"speech_pad_seconds = {settings.speech_pad_seconds}",
+            "",
+            "[vad]",
+            f"threshold = {settings.vad_threshold}",
+            "",
+            "[anki]",
+            f"url = {_toml_str(settings.anki_url)}",
+        ]
+    )
+    if settings.anki_key:
+        lines.append(f"key = {_toml_str(settings.anki_key)}")
+    lines.extend(["", "[stt]"])
+    if settings.whisper_cli:
+        lines.append(f"cli = {_toml_str(str(settings.whisper_cli))}")
+    if settings.whisper_model:
+        lines.append(f"model = {_toml_str(str(settings.whisper_model))}")
+    lines.extend(["", "[models]"])
+    if settings.silero_path:
+        lines.append(f"silero = {_toml_str(str(settings.silero_path))}")
+    if settings.vosk_path:
+        lines.append(f"vosk = {_toml_str(str(settings.vosk_path))}")
+    lines.append("")
+    lines.append("[commands]")
+    for name, variants in settings.phrases.items():
+        inner = ", ".join(_toml_str(v) for v in variants)
+        lines.append(f"{name} = [{inner}]")
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return dest
 
 
 def _apply_toml(settings: Settings, data: dict[str, Any]) -> None:
@@ -155,6 +232,12 @@ def _apply_toml(settings: Settings, data: dict[str, Any]) -> None:
         settings.silero_path = Path(models["silero"])
     if models.get("vosk"):
         settings.vosk_path = Path(models["vosk"])
+
+    stt = data.get("stt") or {}
+    if stt.get("cli"):
+        settings.whisper_cli = Path(stt["cli"])
+    if stt.get("model"):
+        settings.whisper_model = Path(stt["model"])
 
     commands = data.get("commands")
     if commands:

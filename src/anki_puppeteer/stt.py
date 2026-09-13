@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -27,9 +28,39 @@ def find_whisper_cli() -> Optional[Path]:
     which = shutil.which("whisper-cli") or shutil.which("whisper-cli.exe")
     if which:
         return Path(which)
-    home = Path.home() / "tools" / "whisper" / "whisper-cli.exe"
-    if home.is_file():
-        return home
+    candidates = [
+        Path.home() / "tools" / "whisper" / "whisper-cli.exe",
+        cache_dir() / "whisper" / "whisper-cli.exe",
+    ]
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).parent / "whisper" / "whisper-cli.exe")
+    for home in candidates:
+        if home.is_file():
+            return home
+    return None
+
+
+def find_whisper_model() -> Optional[Path]:
+    env = os.environ.get("WHISPER_MODEL")
+    if env and Path(env).is_file():
+        return Path(env)
+    names = (
+        "ggml-tiny.en.bin",
+        "ggml-base.en.bin",
+        "ggml-small.en.bin",
+        "ggml-tiny.bin",
+    )
+    dirs = [
+        cache_dir(),
+        cache_dir() / "models",
+        Path.home() / "tools" / "whisper" / "models",
+        Path.home() / "tools" / "whisper",
+    ]
+    for folder in dirs:
+        for name in names:
+            path = folder / name
+            if path.is_file() and path.stat().st_size > 1_000_000:
+                return path
     return None
 
 

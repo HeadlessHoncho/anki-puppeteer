@@ -1,0 +1,21 @@
+Anki Puppeteer is installed.
+
+What the installer just did
+- Copied the app (no Python install needed)
+- Downloaded whisper.cpp CPU tools if they were missing
+- Downloaded Silero VAD
+- Downloaded ggml-tiny.en.bin unless you pointed at a model you already have
+- Tried to install the AnkiConnect add-on (code 2055492159)
+
+What you need
+- Anki, with a deck open and a review started
+- A microphone
+- Internet only for that first setup download (not for reviewing)
+
+Start menu: Anki Puppeteer
+That shortcut opens Anki if needed, then starts voice control.
+Say: show, again, hard, good, easy, undo.
+
+Logs: %LOCALAPPDATA%\anki-puppeteer\listen.log
+Config: %LOCALAPPDATA%\anki-puppeteer\config.toml
+Speech files stay on this PC. They are not uploaded.

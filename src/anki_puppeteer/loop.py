@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import sys
 import time
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -19,6 +21,7 @@ from anki_puppeteer.stt import (
     ensure_whisper_server,
     find_large_v3_model,
     find_whisper_cli,
+    find_whisper_model,
     find_whisper_server,
 )
 from anki_puppeteer.vad import SileroVAD
@@ -45,12 +48,22 @@ class BurstDetector:
         return self.gate.process(is_speech, frame)
 
 
-def build_stt(kind: str = "auto"):
+def build_stt(kind: str = "auto", settings: Settings | None = None):
     """kind: auto | large | tiny | vosk"""
     kind = (kind or "auto").lower()
-    whisper_cli = find_whisper_cli()
+    settings = settings or Settings()
+    whisper_cli = None
+    if settings.whisper_cli and Path(settings.whisper_cli).is_file():
+        whisper_cli = Path(settings.whisper_cli)
+    else:
+        whisper_cli = find_whisper_cli()
+    configured_model = None
+    if settings.whisper_model and Path(settings.whisper_model).is_file():
+        configured_model = Path(settings.whisper_model)
+    else:
+        configured_model = find_whisper_model()
     if kind == "large":
-        large = find_large_v3_model()
+        large = find_large_v3_model() or configured_model
         server_exe = find_whisper_server()
         if large is None or server_exe is None:
             raise RuntimeError("large-v3 requested but whisper-server or ggml-large-v3.bin was not found")
@@ -59,14 +72,18 @@ def build_stt(kind: str = "auto"):
         log.info("STT: whisper.cpp large-v3 @ %s", url)
         return WhisperServerSTT(url)
     if kind in {"auto", "tiny"} and whisper_cli is not None:
-        log.info("loading whisper.cpp tiny.en via %s", whisper_cli)
-        tiny = ensure_whisper_tiny_en(progress=log.info)
-        log.info("STT: whisper.cpp tiny.en")
-        return WhisperCppSTT(whisper_cli, tiny)
+        log.info("loading whisper.cpp via %s", whisper_cli)
+        model = configured_model or ensure_whisper_tiny_en(progress=log.info)
+        log.info("STT: whisper.cpp %s", model.name)
+        return WhisperCppSTT(whisper_cli, model)
     if kind == "tiny":
-        raise RuntimeError("tiny.en requested but whisper-cli was not found")
+        raise RuntimeError("whisper requested but whisper-cli was not found")
+    if getattr(sys, "frozen", False):
+        raise RuntimeError(
+            "Speech tools are missing. Re-run the installer or: AnkiPuppeteer.exe --setup"
+        )
     log.info("loading Vosk (open vocab, no command grammar)")
-    vosk_path = ensure_vosk(progress=log.info)
+    vosk_path = ensure_vosk(settings.vosk_path, progress=log.info)
     return VoskSTT(vosk_path, sample_rate=16000)
 
 
@@ -121,7 +138,7 @@ def run(settings: Settings, stt_kind: str = "auto") -> int:
     log.info("loading Silero VAD")
     detector = BurstDetector(settings)
 
-    stt = build_stt(stt_kind)
+    stt = build_stt(stt_kind, settings)
 
     client: Optional[AnkiClient] = None
     if settings.dry_run:

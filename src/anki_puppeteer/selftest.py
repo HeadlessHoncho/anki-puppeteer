@@ -103,7 +103,7 @@ def run_wav(path: Path, settings: Settings, stt, expect: str | None = None) -> d
 
 def run_self_test(settings: Settings, stt_kind: str = "tiny") -> int:
     """Generate known TTS clips and run them through the live pipeline."""
-    stt = build_stt(stt_kind)
+    stt = build_stt(stt_kind, settings)
     root = samples_dir()
     results = []
     log.info(
